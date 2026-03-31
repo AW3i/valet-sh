@@ -66,7 +66,7 @@ type RunOpts struct {
 // directly.
 //
 // If exec is not available (e.g. in tests), falls back to cmd.Run().
-func Run(opts RunOpts) error {
+func Run(opts *RunOpts) error {
 	playbookPath := filepath.Join(platform.RepoDir(), "playbooks", opts.Playbook+".yml")
 	if _, err := os.Stat(playbookPath); err != nil {
 		return fmt.Errorf("playbook not found: %s", playbookPath)
@@ -97,7 +97,7 @@ func Run(opts RunOpts) error {
 
 	extraVarsJSON, err := json.Marshal(extraVars)
 	if err != nil {
-		return fmt.Errorf("serialising extra vars: %w", err)
+		return fmt.Errorf("serializing extra vars: %w", err)
 	}
 
 	ansibleBin := platform.AnsiblePlaybookBin()
@@ -110,7 +110,7 @@ func Run(opts RunOpts) error {
 
 	// Change into the repo directory so ansible.cfg is picked up, exactly as
 	// the current bash wrapper does with `cd $BASE_DIR`.
-	if err := os.Chdir(repoDir); err != nil {
+	if err = os.Chdir(repoDir); err != nil {
 		return fmt.Errorf("chdir to %s: %w", repoDir, err)
 	}
 
@@ -120,6 +120,10 @@ func Run(opts RunOpts) error {
 
 	// Use syscall.Exec so that signals (SIGINT, SIGTERM) are delivered directly
 	// to ansible-playbook and the valet process vanishes from the process table.
+	//
+	// SECURITY: This intentionally replaces the current process with ansible-playbook.
+	// The argv and env are constructed from trusted sources (platform package constants
+	// and user's CLI arguments). This is the same behavior as the original bash wrapper.
 	binPath, err := exec.LookPath(ansibleBin)
 	if err != nil {
 		// ansibleBin may already be an absolute path.

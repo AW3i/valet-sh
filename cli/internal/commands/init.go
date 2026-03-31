@@ -27,7 +27,7 @@ func NewInitCmd() *cobra.Command {
 		Short: "Create a blank .valet-sh.yml in the current directory",
 		Long:  "Generates a .valet-sh.yml template in the current working directory.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "init",
 				Args:     args,
 				Verbose:  verbose,

@@ -61,12 +61,18 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Download Go modules and build
+        run: |
+          go mod download
+          go build ./...
+
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.60
+          version: v1.64.8
           working-directory: cli
           args: --timeout=5m
+          skip-cache: true
 
       - name: Build binary
         run: go build ./cmd/valet

@@ -27,7 +27,7 @@ func NewXPSSetupCmd() *cobra.Command {
 		Short: "Apply Dell XPS-specific hardware configuration",
 		Long:  "Runs hardware-specific tweaks for Dell XPS developer laptops (power management, display scaling, etc.).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "xps-setup",
 				Verbose:  verbose,
 			})

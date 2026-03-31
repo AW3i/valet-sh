@@ -36,7 +36,7 @@ func NewExecCmd() *cobra.Command {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "exec",
 				Args:     args,
 				WorkDir:  workDir,

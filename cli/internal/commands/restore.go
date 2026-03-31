@@ -28,7 +28,7 @@ func NewRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restore [identifier]",
 		Short: "Restore project data from remote hub",
-		Long: `Synchronises the project database and/or filesystem from the configured
+		Long: `Synchronizes the project database and/or filesystem from the configured
 remote hub environment. The optional identifier overrides the sync.identifier
 value from .valet-sh.yml.`,
 		Args: cobra.MaximumNArgs(1),
@@ -38,7 +38,7 @@ value from .valet-sh.yml.`,
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "restore",
 				Args:     args,
 				WorkDir:  workDir,

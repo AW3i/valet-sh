@@ -27,7 +27,7 @@ func NewUpdateDevCACmd() *cobra.Command {
 		Short: "Update the development CA certificate",
 		Long:  "Regenerates and installs the local development certificate authority used to sign *.test SSL certificates.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "update-dev-ca",
 				Verbose:  verbose,
 			})

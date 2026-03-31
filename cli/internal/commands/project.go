@@ -49,7 +49,7 @@ func newProjectEnvCmd() *cobra.Command {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "project:env",
 				Args:     args,
 				WorkDir:  workDir,
@@ -74,7 +74,7 @@ func newProjectCCCmd() *cobra.Command {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "project:cc",
 				Args:     args,
 				WorkDir:  workDir,

@@ -27,7 +27,7 @@ func NewInstallCmd() *cobra.Command {
 		Short: "Install and configure the full valet-sh dev stack",
 		Long:  "Installs and configures all services managed by valet-sh (nginx, PHP, MySQL/MariaDB, Elasticsearch, Redis, etc.).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ansible.Run(ansible.RunOpts{
+			return ansible.Run(&ansible.RunOpts{
 				Playbook: "install",
 				Args:     args,
 				Verbose:  verbose,
