@@ -48,7 +48,7 @@ required services and runs the project-type-specific bootstrap workflow
 					return err
 				}
 				if validationErrors := cfg.Validate(); len(validationErrors) > 0 {
-					fmt.Fprintln(os.Stderr, "Invalid .valet-sh.yml:")
+					fmt.Fprintln(os.Stderr, ErrorPrefix("invalid .valet-sh.yml:"))
 					for _, e := range validationErrors {
 						fmt.Fprintf(os.Stderr, "  - %s\n", e)
 					}
