@@ -17,6 +17,7 @@
 package platform
 
 import (
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -73,10 +74,10 @@ func detectArch() string {
 // AnsiblePlaybookBin returns the full path to the ansible-playbook binary,
 // preferring the valet-sh Python venv if present.
 func AnsiblePlaybookBin() string {
-	// The valet-sh installer creates a Python venv under /usr/local/valet-sh/runtime.
+	// The valet-sh installer creates a Python venv under /usr/local/valet-sh/venv.
 	// Prefer that over whatever is on $PATH to ensure the correct Ansible version.
 	candidates := []string{
-		"/usr/local/valet-sh/runtime/bin/ansible-playbook",
+		"/usr/local/valet-sh/venv/bin/ansible-playbook",
 		"/usr/local/bin/ansible-playbook",
 	}
 	for _, c := range candidates {
@@ -102,14 +103,11 @@ func RepoDir() string {
 }
 
 func isExecutable(path string) bool {
-	_, err := exec.LookPath(path)
-	if err == nil {
-		return true
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
 	}
-	// LookPath only searches PATH for bare names; for absolute paths, use
-	// a direct stat check via exec.Command.
-	cmd := exec.Command("test", "-x", path)
-	return cmd.Run() == nil
+	return info.Mode()&0111 != 0
 }
 
 // NormalizeServiceName applies the fuzzy alias mapping that the Ansible
