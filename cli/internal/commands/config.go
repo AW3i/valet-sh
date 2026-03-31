@@ -31,7 +31,7 @@ Examples:
   valet.sh config set hub_domain example.com
   valet.sh config get hub_domain
   valet.sh config list`,
-		Args: cobra.RangeArgs(1, 3),
+		Args: requireArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ansible.Run(ansible.RunOpts{
 				Playbook: "config",

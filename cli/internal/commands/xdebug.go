@@ -31,7 +31,7 @@ configured PHP version if run inside a project directory).
 Examples:
   valet.sh xdebug on
   valet.sh xdebug off php83`,
-		Args: cobra.RangeArgs(1, 2),
+		Args: requireArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ansible.Run(ansible.RunOpts{
 				Playbook: "xdebug",

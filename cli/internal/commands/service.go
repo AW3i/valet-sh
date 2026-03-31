@@ -43,7 +43,7 @@ Services (examples):
   mysql84, mysql80, mysql57
   elasticsearch8, elasticsearch7 ... opensearch3, opensearch2, opensearch1
   redis, valkey8, rabbitmq, nginx`,
-		Args: cobra.RangeArgs(1, 2),
+		Args: requireArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Normalize the service name alias (e.g. "PHP8.3" → "php83") if
 			// a service name was provided as the second argument.

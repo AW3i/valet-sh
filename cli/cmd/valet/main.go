@@ -43,10 +43,19 @@ of PHP, MySQL/MariaDB, Elasticsearch/OpenSearch, Redis, RabbitMQ, and nginx
 on both Ubuntu and macOS (Intel and Apple Silicon).
 
 Configuration is driven by a .valet-sh.yml file in each project directory.`,
-		// Suppress the default "Error: unknown command" message — Ansible's
-		// callback plugin handles its own output.
-		SilenceUsage: true,
-		Version:      Version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Version:       Version,
+		// No args at root → show help.
+		// Unknown command → cobra calls RunE with the unknown token as an arg,
+		// so we show help and exit cleanly rather than printing a confusing error.
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", args[0])
+			}
+			return cmd.Help()
+		},
 	}
 
 	// Print version in the same style as the rest of the tool.

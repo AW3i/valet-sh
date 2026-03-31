@@ -34,7 +34,7 @@ Actions:
   import <file>    Import a SQL dump into the project database
   export [file]    Export the project database to a SQL dump
   drop             Drop and recreate the project database`,
-		Args: cobra.MinimumNArgs(1),
+		Args: requireMinArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			workDir, err := os.Getwd()
 			if err != nil {
