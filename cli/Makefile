@@ -44,17 +44,44 @@ build-all:
 	@echo "All binaries written to $(DIST)/"
 	@ls -lh $(DIST)/$(BINARY)-*
 
-## test: Run all tests
+## test: Run all tests with race detector
 test:
 	go test -race ./...
 
-## lint: Run go vet (install golangci-lint separately for full linting)
+## test-coverage: Run tests with coverage report
+test-coverage:
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	go tool cover -func=coverage.out
+
+## fmt-check: Verify code formatting (CI quality gate)
+fmt-check:
+	@if [ -n "$(gofmt -l .)" ]; then \
+		echo "The following files need formatting:"; \
+		gofmt -l .; \
+		echo "Run 'gofmt -w .' to fix"; \
+		exit 1; \
+	fi
+	@echo "All files properly formatted"
+
+## lint: Run golangci-lint (install separately: https://golangci-lint.run/usage/install/)
 lint:
+	golangci-lint run
+
+## vet: Run go vet static analysis
+vet:
 	go vet ./...
 
-## clean: Remove build artifacts
+## mod-verify: Verify go.mod is tidy
+mod-verify:
+	go mod tidy
+	git diff --exit-code go.mod go.sum
+
+## quality: Run all quality checks (fmt, vet, lint, mod-verify)
+quality: fmt-check vet mod-verify
+
+## clean: Remove build artifacts and coverage files
 clean:
-	rm -rf $(DIST)
+	rm -rf $(DIST) coverage.out
 
 ## help: Show this help
 help:
