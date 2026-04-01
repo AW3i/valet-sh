@@ -52,6 +52,16 @@ playbook.
 
 ---
 
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for:
+- System overview (4-repo ecosystem + install flow)
+- TUI state machine diagram
+- Execution sequence diagram
+- Colour palette reference
+
+---
+
 ## What Has Been Built
 
 ### Go CLI (`cli/`)
@@ -100,8 +110,8 @@ comment suspicious code, consult the user before proceeding.
 | Security audit: RCE surface through subprocess args | **High** (deferred) |
 | Supply chain: pin GitHub Actions to commit SHAs | **High** (deferred) |
 | Supply chain: audit charm ecosystem deps | **High** (deferred) |
-| Architecture diagram (system overview + TUI state flow) | Medium |
-| Implement progress bar in execution panel | Medium |
+| Architecture diagram | Medium (done ✓) |
+| Implement progress bar in execution panel | Medium (done ✓) |
 | Shell completions — bash/zsh/fish via cobra, install on setup/update | Medium |
 | Add security-focused tests | Medium |
 | TUI: `<Tab>` to toggle between horizontal scroll and vertical list view | Low |
