@@ -65,16 +65,20 @@ Built from scratch alongside the existing Ansible playbooks:
   (blue `▶` headers, green selection, red `✘` errors)
 - **Weekly update check** — polls GitHub Releases API, prompts `[Y/n]`,
   re-execs the original command after updating
-- **Bubble Tea TUI** — interactive launcher when `valet.sh` is run with no
-  arguments:
-  - Hierarchical command navigation with breadcrumb header
-  - Inline argument input pane per command
-  - Live execution panel with rolling log tail (`debug.log`, 100ms poll)
-  - Log viewer on failure: `View full log? [Y/n]` → full-screen scrollable
-    viewport showing the last 10,000 lines
-  - TTY-aware: panel shown on interactive terminals, `syscall.Exec` fallback
-    for CI/pipes
-- **52 unit tests** across 5 packages
+- **Bubble Tea TUI** — compact inline launcher (`valet.sh` / `valet.sh --vi`):
+  - Single horizontal scrollable command bar (`←/→` or `h/l` in vim mode)
+  - Header shows ghost text of the currently hovered command
+  - `ctrl+[` toggles vim mode (`hjkl` navigation); `[VIM]` indicator left of version
+  - `valet.sh --vi` launches directly in vim mode
+  - Inline box opens below selected command: ghost prompt (`valet.sh <cmd> █`) +
+    scrollable docs (`ctrl+d/u/f/b`) — always insert mode, no modal switching
+  - Fuzzy filter: type any character to search commands
+  - Live execution panel (full-width, inline — no alt-screen)
+  - Log viewer on failure: `View full log? [Y/n]` → scrollable viewport
+  - Terminal palette colours (adapts to user's theme)
+  - TTY-aware: panel on TTY, `syscall.Exec` fallback for CI/pipes
+- **Shell completions** (planned) — bash/zsh/fish via cobra
+- **60+ unit tests** across 6 packages
 - **CI/CD**: golangci-lint v1.64.8, gofmt, go vet, race detector, Codecov,
   cross-platform release pipeline (4 binaries on `v*` tags)
 
@@ -87,19 +91,23 @@ committed locally and ready to push. The first release tag has not been cut.
 
 ## Open Todos
 
+Security audits are deferred — flag dangerous patterns during development,
+comment suspicious code, consult the user before proceeding.
+
 | Item | Priority |
 |---|---|
-| Cut first release tag — Go binaries not yet downloadable | **High** |
-| Push `valet-sh/cli`, `runtime`, `installer` changes | **High** |
-| Checksum verification in installer binary download | **High** |
-| Security audit: verify no RCE surface through downloads or subprocess args | **High** |
-| Supply chain: pin GitHub Actions to full SHAs (currently `@v4` tags) | **High** |
-| Supply chain: audit external dependencies (bubbletea, cobra, charm ecosystem) | **High** |
-| Add search/filter bar to TUI command launcher | Medium |
+| Checksum verification in installer download | **High** (done ✓) |
+| Security audit: RCE surface through subprocess args | **High** (deferred) |
+| Supply chain: pin GitHub Actions to commit SHAs | **High** (deferred) |
+| Supply chain: audit charm ecosystem deps | **High** (deferred) |
 | Architecture diagram (system overview + TUI state flow) | Medium |
-| Implement progress bar in execution panel (placeholder exists) | Medium |
-| Add security-focused tests (input sanitisation, path traversal) | Medium |
+| Implement progress bar in execution panel | Medium |
+| Shell completions — bash/zsh/fish via cobra, install on setup/update | Medium |
+| Add security-focused tests | Medium |
+| TUI grid layout view (2-column alternative to horizontal scroll) | Low |
 | Convert Ansible roles to native Go commands where it makes sense | Long-term |
+| Cut first release tag | Low |
+| Push `valet-sh/cli`, `runtime`, `installer` changes | Low |
 | Merge `ansible-lint` branch | Low |
 
 ---

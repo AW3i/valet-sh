@@ -175,36 +175,61 @@ See `platform.NormalizeServiceName()` for the full mapping.
 
 | File | Responsibility |
 |---|---|
-| `launcher.go` | Root Bubble Tea model. Navigation stack (`stackEntry`), screen state machine, `commandList` management. Hosts `ExecModel` when executing. |
-| `list.go` | `CommandItem` implements `bubbles/list.Item`. Custom delegate with valet-sh colours. `argsFromUse()` parses cobra `Use` strings for arg pane. |
-| `args.go` | `ArgPane` — one `bubbles/textinput` per argument. Tab navigation between fields. `IsReady()` checks required fields. |
-| `exec.go` | `ExecModel` — live log panel + log viewer. See below. |
-| `runner.go` | `RunWithPanel()` entry point for direct CLI invocations. `standaloneExecModel` wraps `ExecModel` as a full-screen program. `resolveRunOpts()` maps cobra args to `ansible.RunOpts`. |
-| `styles.go` | Lip Gloss styles. Colour values match the Python callback plugin's ANSI codes exactly. |
+| `launcher.go` | Root Bubble Tea model. Navigation stack, screen state machine (`screenList` / `screenInline` / `screenExec`), horizontal command bar, vim mode toggle, header ghost text. |
+| `list.go` | `CommandItem` implements `bubbles/list.Item`. `renderHorizontalList()` renders the single-row scrollable command bar. `renderHelpBar()` / `renderInlineHelpBar()`. `argsFromUse()` parses cobra `Use` strings. |
+| `inline.go` | `InlineBox` — unified arg input + scrollable docs panel. Single `textinput` with ghost command prefix. `ctrl+d/u/f/b` scroll the documentation. Always insert mode (no vim modal switching). |
+| `args.go` | `ArgPane` — original multi-field argument input. **Kept for future use**; superseded by `InlineBox` for current flows. |
+| `exec.go` | `ExecModel` — live log panel + log viewer on failure. |
+| `runner.go` | `RunWithPanel()` entry point for direct CLI invocations. `standaloneExecModel` wraps `ExecModel`. `resolveRunOpts()` maps cobra args to `ansible.RunOpts`. |
+| `styles.go` | Lip Gloss styles. Uses **terminal palette indices** (0–15) not hex — adapts to user's terminal theme. |
 
 ### Screen state machine
 
-The root `model` in `launcher.go` tracks state with the `screen` type:
-
 ```
-screenList   Default: user navigates command hierarchy
+screenList    Horizontal command bar. ←/→ navigate, type to filter.
      │
-     │ Enter (leaf, has args)
+     │ Enter (any command)
      ▼
-screenArgs   Inline argument input; Tab between fields
+screenInline  InlineBox open below selected command.
+              Prompt: "valet.sh <command> █" (ghost prefix + blinking cursor)
+              Docs scrollable with ctrl+d/u/f/b.
      │
-     │ Enter (all required filled)  OR
-     └───────────────────────────────────┐
-                                         │
-     (Enter on leaf with no args)        │
-     ────────────────────────────────────┘
-                                         ▼
-screenExec   ExecModel active on right pane (or full screen for direct CLI)
+     │ Enter (executes command + typed args)
+     ▼
+screenExec    ExecModel full-width. Live log tail. Failure → "View full log? [Y/n]"
 ```
 
-Inside `ExecModel`, a separate boolean flag `logViewOpen` controls whether
-the full-screen log viewer is shown (distinct from the screen state machine
-because it lives entirely within the exec model).
+### Vim mode (easter egg)
+
+`ctrl+[` toggles vim mode. State persists for the session.
+`valet.sh --vi` or `valet.sh -vi` launches TUI in vim mode directly.
+
+| Normal mode | Vim mode |
+|---|---|
+| `←/→` navigate | `h/l` navigate |
+| `↑/↓` navigate | `j/k` navigate |
+| type to filter | `/` or type to filter |
+| `ctrl+[` → vim mode | `ctrl+[` → normal mode |
+
+Vim mode indicator shown left of the version in the header: `[VIM]  v2.9.19`
+
+**Important**: the `InlineBox` is always insert mode — there is no `i`/`Esc`
+modal switching. When the box is open you are typing. Full stop.
+
+### InlineBox
+
+```
+InlineBox
+  ├── commandPath string        "service" or "project env"
+  ├── input textinput.Model     Prompt = "valet.sh service " (dim ghost)
+  ├── docs string               Long description, word-wrapped
+  ├── docsLines []string        Docs split into lines for scrolling
+  └── docsOffset int            Current scroll position
+```
+
+The inline box renders inside a rounded Lip Gloss border. The user types
+free-form arguments after the ghost prompt. Arguments are passed as-is to
+Ansible — no per-field parsing at this stage.
 
 ### ExecModel internals
 
@@ -218,32 +243,29 @@ ExecModel
 
 **Log tailing**: on subprocess start, `debug.log` is opened and seeked to
 current EOF. A 100ms `tea.Tick` polls for new bytes using `bufio.Scanner`.
-Lines are appended to `viewport` content and `GotoBottom()` is called.
+Lines are appended to `viewport` and `GotoBottom()` is called.
 
 **`tailFile()`**: reads up to `logViewMaxLines` (10,000) lines using a ring
 buffer — single O(n) pass, O(maxLines) memory, no backward seeking.
-
-**Two viewport fields, not one**: `viewport` is the rolling live output during
-execution. `logViewer` is the full-screen post-failure viewer. They are
-separate to avoid tearing down and rebuilding a scrolled viewport when the
-user switches between them.
 
 ### Two Ansible execution paths
 
 | Function | Where used | Mechanism | Why |
 |---|---|---|---|
-| `ansible.Run()` | Non-TTY / `--help` / unknown command fallback | `syscall.Exec` replaces process | Signals (Ctrl-C) flow to Ansible; Go process disappears |
+| `ansible.Run()` | Non-TTY / direct dispatch fallback | `syscall.Exec` replaces process | Signals (Ctrl-C) flow to Ansible; Go process disappears |
 | `ansible.RunSubprocess()` | TUI execution panel | `exec.Cmd.Start()` returns `*exec.Cmd` | Go stays alive to tail log and render panel |
 
 ### Colour palette
 
-All colours in `styles.go` match the Python callback plugin (`plugins/callback/valet-sh.py`):
+`styles.go` uses terminal palette indices — adapts to user's terminal theme:
 
-| Name | Hex | Matches Ansible ANSI |
+| Name | Index | Role |
 |---|---|---|
-| `colourBlue` | `#1E90FF` | `\033[1;34m` — play start headers |
-| `colourGreen` | `#00CC00` | `\033[0;32m` — spinner/ok |
-| `colourRed` | `#FF3333` | `\033[1;31m` — failure |
+| `colourBlue` | `12` (bright blue) | Headers, prompts |
+| `colourGreen` | `10` (bright green) | Selected item, success |
+| `colourRed` | `9` (bright red) | Failure, errors |
+| `colourDim` | `8` (bright black) | Ghost text, separators, dim hints |
+| `colourText` | `7` (normal fg) | Regular list items, input text |
 
 ---
 
@@ -363,19 +385,21 @@ if c.Services.Redis != nil && c.Services.Valkey != nil {
 
 ## Open Todos
 
-| Item | Notes |
-|---|---|
-| Cut first release tag | Go binaries not yet downloadable |
-| Push cli/runtime/installer changes | Committed locally in /tmp |
-| Checksum verification in installer | `checksums.txt` published but not verified on download |
-| Pin GitHub Actions to SHAs | Currently using mutable `@v4` tags |
-| Audit charm ecosystem deps | bubbletea, bubbles, lipgloss — review changelogs and signatures |
-| Search bar in TUI launcher | Filter commands as you type |
-| Architecture diagram | System overview + TUI state flow diagram |
-| Progress bar in exec panel | Placeholder in `execView()` already exists |
-| Security tests | Input sanitisation, path traversal, subprocess arg injection |
-| Convert Ansible to native Go | Gradual, where it makes sense |
-| Merge `ansible-lint` branch | ansible-lint + syntax check CI |
+| Item | Priority | Notes |
+|---|---|---|
+| Checksum verification in installer | High | `checksums.txt` published but not verified on download |
+| Security audit: RCE surface | High (deferred) | Trace all subprocess arg paths |
+| Pin GitHub Actions to commit SHAs | High (deferred) | Currently mutable `@v4` tags |
+| Audit charm ecosystem deps | High (deferred) | bubbletea, bubbles, lipgloss |
+| Security tests | Medium | Input sanitisation, path traversal |
+| Architecture diagram | Medium | System overview + TUI state flow |
+| Progress bar in exec panel | Medium | No placeholder in execView() anymore — implement from scratch |
+| Shell completions | Medium | bash/zsh/fish via cobra — install during `valet-sh-installer setup/update` |
+| TUI grid layout view | Low | 2-column grid as alternative to horizontal scroll (can toggle views) |
+| Convert Ansible to native Go | Long-term | Gradual, where it makes sense |
+| Cut first release tag | Low | Go binaries not yet downloadable |
+| Push cli/runtime/installer changes | Low | Committed locally in /tmp |
+| Merge `ansible-lint` branch | Low | ansible-lint + syntax check CI |
 
 ---
 
