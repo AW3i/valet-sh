@@ -395,7 +395,8 @@ if c.Services.Redis != nil && c.Services.Valkey != nil {
 | Architecture diagram | Medium | System overview + TUI state flow |
 | Progress bar in exec panel | Medium | No placeholder in execView() anymore — implement from scratch |
 | Shell completions | Medium | bash/zsh/fish via cobra — install during `valet-sh-installer setup/update` |
-| TUI grid layout view | Low | 2-column grid as alternative to horizontal scroll (can toggle views) |
+| TUI: Tab toggles horizontal ↔ vertical list view | Low | `<Tab>` cycles layout; both renderers exist, just swap which `render()` calls |
+| TUI grid layout view | Low | 2-column grid as third layout option |
 | Convert Ansible to native Go | Long-term | Gradual, where it makes sense |
 | Cut first release tag | Low | Go binaries not yet downloadable |
 | Push cli/runtime/installer changes | Low | Committed locally in /tmp |

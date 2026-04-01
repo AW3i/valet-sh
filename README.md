@@ -104,6 +104,7 @@ comment suspicious code, consult the user before proceeding.
 | Implement progress bar in execution panel | Medium |
 | Shell completions — bash/zsh/fish via cobra, install on setup/update | Medium |
 | Add security-focused tests | Medium |
+| TUI: `<Tab>` to toggle between horizontal scroll and vertical list view | Low |
 | TUI grid layout view (2-column alternative to horizontal scroll) | Low |
 | Convert Ansible roles to native Go commands where it makes sense | Long-term |
 | Cut first release tag | Low |
