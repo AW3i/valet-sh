@@ -1,53 +1,128 @@
-# SKILLS.md - Domain Knowledge for valet-sh CLI
+# SKILLS.md — Domain Knowledge for valet-sh CLI
 
-## Project Context
+This file contains architectural knowledge, domain context, and design
+rationale. Read it when you need to understand *why* things are the way they
+are, not just how to work with them.
 
-valet-sh is a local development environment manager for Magento, PHP, and other projects. It manages multiple simultaneous versions of:
-- PHP (5.6 through 8.5)
-- MariaDB/MySQL (multiple versions)
-- Elasticsearch/OpenSearch
-- Redis/Valkey
+---
+
+## What valet-sh Does
+
+valet-sh provisions and manages local development environments for Magento,
+PHP, Neos, AEM, and OroCRM projects. It manages multiple simultaneous versions
+of:
+
+- PHP 5.6 – 8.5
+- MariaDB 10.4 – 11.4 / MySQL 5.7 – 8.4
+- Elasticsearch 1 – 8 / OpenSearch 1 – 3
+- Redis / Valkey
 - RabbitMQ
-- Nginx
-- dnsmasq
+- Nginx + dnsmasq
+
+It runs on Ubuntu (amd64, arm64) and macOS (Intel `darwin/amd64`, Apple
+Silicon `darwin/arm64`).
+
+---
 
 ## Architecture Overview
 
-### Three-Layer Architecture
-
 ```
 User
-  ↓ runs `valet.sh init-instance`
-valet-sh CLI (Go binary) ← THIS CODEBASE
-  ↓ reads .valet-sh.yml
-  ↓ execs ansible-playbook
-Ansible Playbooks
-  ↓ manages services
-System (macOS/Ubuntu)
+  │
+  │  runs valet.sh
+  ▼
+valet.sh (bash)                 /usr/local/valet-sh/venv/bin/valet.sh
+  │                             Thin wrapper: exec's Go CLI binary
+  ▼
+valet (Go CLI binary)           /usr/local/valet-sh/bin/valet
+  │
+  ├── No args?    → TUI launcher (Bubble Tea, interactive)
+  │
+  ├── Args, TTY?  → Execution panel (Bubble Tea, shows debug.log)
+  │                 starts ansible-playbook as subprocess
+  │
+  └── Args, pipe? → syscall.Exec into ansible-playbook directly
+                    (Go process replaced, signals flow through)
+  ▼
+ansible-playbook                /usr/local/valet-sh/venv/bin/ansible-playbook
+  │
+  └── Playbooks + roles         /usr/local/valet-sh/valet-sh/
+        └── Manages services on the host OS (macOS/Ubuntu)
 ```
 
 ### Why Go + Ansible?
 
-The original tool was pure Ansible. The Go CLI was added to:
-1. Provide typed config validation (YAML → Go structs)
-2. Better UX (help text, argument validation)
-3. Update checking
-4. Eventually replace the bash wrapper
+The tool was originally pure Ansible/bash. The Go CLI was added to provide:
 
-**Important**: Go doesn't replace Ansible - it orchestrates it. All heavy lifting (installing packages, configuring nginx, etc.) still happens in Ansible.
+1. Typed `.valet-sh.yml` validation with clear error messages
+2. Better UX: contextual help, TUI, styled output
+3. Update checking and self-management
+4. A foundation for gradually replacing Ansible roles with native Go where it
+   makes sense (long-term goal)
+
+Ansible still handles all provisioning, service management, and bootstrapping.
+Go orchestrates it.
+
+---
+
+## Repository Ecosystem
+
+| Repo | Purpose |
+|---|---|
+| `valet-sh/install` | One-liner `curl \| bash` bootstrap |
+| `valet-sh/installer` | Go binary: machine setup, downloads Go CLI binary |
+| `valet-sh/cli` | Python package: bash wrapper (`valet.sh`), delegates to Go CLI |
+| `valet-sh/runtime` | Python venv tarball: Ansible + pip dependencies |
+| `valet-sh/valet-sh` | **This repo**: Ansible playbooks + Go CLI source |
+
+### Release sequence
+
+```
+1. Tag valet-sh/valet-sh  →  GitHub Actions builds 4 binaries
+2. Tag valet-sh/cli       →  bash wrapper updated (exec to Go binary)
+3. Tag valet-sh/runtime   →  venv tarball rebuilt with new cli package
+4. Tag valet-sh/installer →  installer downloads new Go binary on setup/update
+```
+
+---
+
+## Installation Layout
+
+```
+/usr/local/valet-sh/
+├── bin/
+│   └── valet                    Go CLI binary (from this repo)
+├── etc/
+│   ├── config.yml               Global config (hub_domain, development_tld)
+│   ├── links.yml                Active vhost symlinks
+│   └── .last_update_check       Mtime = timestamp of last update check
+├── installer/
+│   └── valet-sh-installer       Bootstrap installer (valet-sh/installer)
+├── packages/                    Homebrew packages, downloaded tarballs
+├── valet-sh/
+│   ├── playbooks/               Ansible playbooks (from this repo)
+│   ├── roles/                   Ansible roles (from this repo)
+│   └── log/
+│       └── debug.log            Ansible callback output (tailed by exec panel)
+└── venv/
+    └── bin/
+        ├── ansible-playbook     Ansible from Python venv
+        └── valet.sh             Bash wrapper → execs Go binary
+```
+
+---
 
 ## .valet-sh.yml Format
 
-This is the project's "interface" - users define their needs here.
+Project configuration file. Format is stable — never change keys without
+backwards compatibility.
 
 ```yaml
-# Remote hub for valet-restore command
 hub:
   host: "git.example.com"
   port: 22
   path: "/data"
 
-# Service versions required
 services:
   php:
     version: 8.1
@@ -57,248 +132,262 @@ services:
   elasticsearch:
     version: 7
     plugins: ["analysis-icu"]
-  redis: {}  # Just needs to exist
+  redis: {}
 
-# Project metadata
 instance:
-  key: "myproject"        # Hostname: myproject.test
-  type: "magento2"        # Bootstrap workflow
-  path: "src"             # Docroot
-  
-  # Multi-domain support
+  key: "myproject"        # Becomes hostname: myproject.test
+  type: "magento2"        # Bootstrap workflow type
+  path: "src"             # Docroot relative to project root
+
   multidomain:
     "de.magento.test": "de_DE"
-    
-  # Sync configuration for valet-restore
+
   sync:
     identifier: "staging"
     db: true
     fs: ["pub/media", "var/log"]
 ```
 
-### Instance Types
-- `magento2` - Full Magento 2 workflow (env.php generation, indexer, etc.)
-- `magento1` - Magento 1 workflow
-- `neos` - Neos CMS workflow
-- `aem` - Adobe Experience Manager
-- `orocrm` - OroCRM
+### Instance types
 
-### Service Fuzzy Aliases
+| Type | Bootstrap behaviour |
+|---|---|
+| `magento2` | `env.php` generation, indexer setup, cache clear |
+| `magento1` | Magento 1 local XML config |
+| `neos` | Neos CMS setup |
+| `aem` | Adobe Experience Manager |
+| `orocrm` | OroCRM |
 
-The CLI normalizes service names:
+### Service fuzzy aliases
+
+The CLI normalises service names before passing to Ansible:
 - `PHP8.3`, `php8.3`, `PHP83` → `php83`
 - `mariadb10.4`, `MARIADB10.4` → `mariadb104`
-- `mysql5.7`, `MYSQL5.7` → `mysql57`
+- `mysql5.7` → `mysql57`
 
-See `platform.NormalizeServiceName()` for full mapping.
+See `platform.NormalizeServiceName()` for the full mapping.
 
-## File Locations
+---
 
-The tool installs to `/usr/local/valet-sh/` with this structure:
+## TUI Package (`internal/tui/`)
+
+### Files and responsibilities
+
+| File | Responsibility |
+|---|---|
+| `launcher.go` | Root Bubble Tea model. Navigation stack (`stackEntry`), screen state machine, `commandList` management. Hosts `ExecModel` when executing. |
+| `list.go` | `CommandItem` implements `bubbles/list.Item`. Custom delegate with valet-sh colours. `argsFromUse()` parses cobra `Use` strings for arg pane. |
+| `args.go` | `ArgPane` — one `bubbles/textinput` per argument. Tab navigation between fields. `IsReady()` checks required fields. |
+| `exec.go` | `ExecModel` — live log panel + log viewer. See below. |
+| `runner.go` | `RunWithPanel()` entry point for direct CLI invocations. `standaloneExecModel` wraps `ExecModel` as a full-screen program. `resolveRunOpts()` maps cobra args to `ansible.RunOpts`. |
+| `styles.go` | Lip Gloss styles. Colour values match the Python callback plugin's ANSI codes exactly. |
+
+### Screen state machine
+
+The root `model` in `launcher.go` tracks state with the `screen` type:
 
 ```
-/usr/local/valet-sh/
-├── bin/
-│   └── valet                    # Go CLI binary (from this repo)
-├── etc/
-│   ├── config.yml               # Global config
-│   ├── links.yml                # Symlink tracking
-│   └── .last_update_check       # Update check timestamp
-├── installer/
-│   └── valet-sh-installer       # Separate Go binary (different repo)
-├── packages/
-│   └── *.tar.gz                 # Python venv, Homebrew packages
-├── valet-sh/
-│   ├── playbooks/               # Ansible playbooks (from this repo)
-│   └── roles/                   # Ansible roles (from this repo)
-└── venv/
-    └── bin/
-        ├── ansible-playbook     # From venv tarball
-        └── valet.sh             # Bash wrapper (delegates to Go CLI)
+screenList   Default: user navigates command hierarchy
+     │
+     │ Enter (leaf, has args)
+     ▼
+screenArgs   Inline argument input; Tab between fields
+     │
+     │ Enter (all required filled)  OR
+     └───────────────────────────────────┐
+                                         │
+     (Enter on leaf with no args)        │
+     ────────────────────────────────────┘
+                                         ▼
+screenExec   ExecModel active on right pane (or full screen for direct CLI)
 ```
+
+Inside `ExecModel`, a separate boolean flag `logViewOpen` controls whether
+the full-screen log viewer is shown (distinct from the screen state machine
+because it lives entirely within the exec model).
+
+### ExecModel internals
+
+```
+ExecModel
+  ├── viewport viewport.Model    Rolling live-log panel (100ms poll of debug.log)
+  ├── logViewer viewport.Model   Full-screen viewer shown after Y/n prompt
+  ├── awaitingLogPrompt bool     True after failure, waiting for Y/n
+  └── logViewOpen bool           True once user pressed Y and log is loaded
+```
+
+**Log tailing**: on subprocess start, `debug.log` is opened and seeked to
+current EOF. A 100ms `tea.Tick` polls for new bytes using `bufio.Scanner`.
+Lines are appended to `viewport` content and `GotoBottom()` is called.
+
+**`tailFile()`**: reads up to `logViewMaxLines` (10,000) lines using a ring
+buffer — single O(n) pass, O(maxLines) memory, no backward seeking.
+
+**Two viewport fields, not one**: `viewport` is the rolling live output during
+execution. `logViewer` is the full-screen post-failure viewer. They are
+separate to avoid tearing down and rebuilding a scrolled viewport when the
+user switches between them.
+
+### Two Ansible execution paths
+
+| Function | Where used | Mechanism | Why |
+|---|---|---|---|
+| `ansible.Run()` | Non-TTY / `--help` / unknown command fallback | `syscall.Exec` replaces process | Signals (Ctrl-C) flow to Ansible; Go process disappears |
+| `ansible.RunSubprocess()` | TUI execution panel | `exec.Cmd.Start()` returns `*exec.Cmd` | Go stays alive to tail log and render panel |
+
+### Colour palette
+
+All colours in `styles.go` match the Python callback plugin (`plugins/callback/valet-sh.py`):
+
+| Name | Hex | Matches Ansible ANSI |
+|---|---|---|
+| `colourBlue` | `#1E90FF` | `\033[1;34m` — play start headers |
+| `colourGreen` | `#00CC00` | `\033[0;32m` — spinner/ok |
+| `colourRed` | `#FF3333` | `\033[1;31m` — failure |
+
+---
 
 ## Update Flow
 
-1. Go CLI has `updater.Check()` which runs at most once per week
-2. Fetches `https://api.github.com/repos/valet-sh/valet-sh/releases/latest`
-3. Compares version with baked-in `Version` var
-4. If newer, prompts user: "Update now? [y/N]"
-5. On yes: runs `valet-sh-installer update` then re-execs current command
+1. `updater.Check()` runs on every command invocation (skipped for `--help`/`--version`)
+2. Reads mtime of `/usr/local/valet-sh/etc/.last_update_check`
+3. If older than 7 days: fetches GitHub Releases API (`api.github.com/repos/valet-sh/valet-sh/releases/latest`), 3s timeout
+4. Writes timestamp regardless (avoids hammering API on network errors)
+5. If newer version: prompts `Update now? [Y/n]`
+6. On Y: runs `valet-sh-installer update`, then `syscall.Exec` re-runs original command
+7. Version comparison uses semver parsing (`major.minor.patch`), ignoring git-describe suffixes
 
-## Release Process
-
-GitHub Actions (`.github/workflows/release-cli.yml`):
-
-```
-git tag v2.10.0
-  ↓
-GitHub Actions triggers
-  ↓
-Builds 4 binaries:
-  - valet-linux-amd64
-  - valet-linux-arm64  
-  - valet-darwin-amd64
-  - valet-darwin-arm64
-  ↓
-Uploads to GitHub Release
-  ↓
-Installer downloads appropriate binary
-```
+---
 
 ## Security Model
 
-### Subprocess Execution
-The CLI uses `syscall.Exec()` to replace itself with ansible-playbook:
-- **Why**: Signal handling (Ctrl-C flows directly to Ansible)
-- **Safe**: argv constructed from trusted constants + user input
-- **Same**: Same security model as original bash wrapper
+### Subprocess args
 
-### File Paths
-- All paths are absolute (under `/usr/local/valet-sh/`)
-- No user-controlled path traversal
-- Downloads from GitHub releases (HTTPS + checksums in future)
+`ansible.Run()` and `ansible.RunSubprocess()` build `argv` from:
+- Absolute path to `ansible-playbook` from `platform.AnsiblePlaybookBin()`
+- Absolute path to playbook file from `platform.RepoDir()` + playbook name
+- Extra-vars JSON with `CLIVars` struct (serialised from typed fields)
+- User CLI args are passed through cobra's parsing layer before reaching argv
+
+No raw user strings reach `exec.Command` or `syscall.Exec` directly.
+
+### File paths
+
+`tailFile()` always receives the `logPath` constant
+(`/usr/local/valet-sh/valet-sh/log/debug.log`). The gosec G304 warning is
+excluded in `.golangci.yml` with this explanation. If `tailFile` is ever
+changed to accept user-provided paths, remove that exclusion and add proper
+validation.
+
+### Go module integrity
+
+`go.sum` pins exact SHA-256 hashes (`h1:...`) for every module dependency.
+Running `go mod download` verifies these hashes. Dependencies cannot be
+silently swapped.
+
+### GitHub Actions (known gap)
+
+CI workflows currently reference actions by mutable tags (`@v4`, `@v5`).
+Tags can be moved. To harden against supply chain attacks, pin to full commit
+SHAs:
+
+```yaml
+# Current (mutable)
+uses: actions/checkout@v4
+
+# Hardened (immutable)
+uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+```
+
+This is tracked as an open todo.
+
+---
+
+## Version Handling
+
+| Context | Format | Example |
+|---|---|---|
+| Git tags | `v` prefix | `v2.10.0` |
+| Binary (ldflags) | No `v` prefix | `2.10.0` |
+| Dev build (git describe) | No `v`, has suffix | `2.9.19-102-g35e11d2` |
+
+`parseSemver()` in `updater/check.go` strips the git-describe suffix
+(`-102-g35e11d2`) before comparing versions. `dev` builds (local, no tag)
+skip the update check entirely.
+
+---
+
+## Platform Detection
+
+`platform.Detect()` returns an `Info` struct with `OS` (`ubuntu`/`mac`) and
+`Arch` (`amd64`/`arm64`). These are passed to Ansible via the `cli` extra-var.
+Platform-specific logic lives entirely in Ansible roles, not in Go.
+
+The `valet.sh` installer handles `linux-gnu` as Ubuntu (matching existing
+Ansible role behaviour). Linux Mint remapping is handled inside the
+`shared-variables` Ansible role.
+
+---
 
 ## Common Operations
 
-### Adding a New Command
+### Adding a new command
 
-Example: Adding `valet.sh backup` command
+See `AGENTS.md` for the code pattern. Additionally:
 
-1. Create `internal/commands/backup.go`:
-```go
-package commands
+1. Create `playbooks/<name>.yml` in the Ansible playbooks directory
+2. Create `internal/commands/<name>.go` with `NewXxxCmd()`
+3. Register in `cmd/valet/main.go`
+4. Add unit tests in `internal/commands/<name>_test.go` if there's logic
 
-import (
-    "github.com/spf13/cobra"
-    "github.com/valet-sh/valet-sh/cli/internal/ansible"
-)
+### Adding config validation
 
-func NewBackupCmd() *cobra.Command {
-    var verbose bool
-    cmd := &cobra.Command{
-        Use:   "backup [name]",
-        Short: "Backup project database and files",
-        Args:  requireMinArgs(1),
-        RunE: func(cmd *cobra.Command, args []string) error {
-            return ansible.Run(&ansible.RunOpts{
-                Playbook: "backup",
-                Args:     args,
-                Verbose:  verbose,
-            })
-        },
-    }
-    cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
-    return cmd
-}
-```
+In `internal/config/project.go`, add to the `Validate()` method:
 
-2. Add to `cmd/valet/main.go`:
-```go
-cmd.AddCommand(
-    // ... existing commands ...
-    commands.NewBackupCmd(),
-)
-```
-
-3. Create `playbooks/backup.yml` (Ansible, separate concern)
-
-### Adding Config Validation
-
-In `internal/config/project.go`, add to `Validate()`:
 ```go
 if c.Services.Redis != nil && c.Services.Valkey != nil {
     errs = append(errs, "services.redis and services.valkey cannot both be set")
 }
 ```
 
-## Testing Strategies
+### Adding a new TUI screen
 
-### Unit Tests
-Test pure Go logic (parsing, validation, etc.)
-- Example: `updater/check_test.go` tests semver comparison
-- No external dependencies
-- Fast execution
+1. Add a constant to the `screen` type in `launcher.go`
+2. Handle it in `handleKey()` and `routeMsg()`
+3. Add rendering in `render()` or as a separate `xxxView()` method
+4. Update `resizeAll()` if the new screen has resizable components
+5. Add `hugeParam` exclusion in `.golangci.yml` if a new model struct is added
+6. Write tests in `launcher_test.go` or a new `xxx_test.go`
 
-### Integration Tests
-Not currently implemented, but would test:
-- Temp .valet-sh.yml file → parse → validate workflow
-- Mock ansible-playbook binary
-- End-to-end command execution
+---
 
-## Platform Differences
+## Open Todos
 
-### macOS vs Linux
-The Go CLI doesn't handle platform differences - Ansible does.
+| Item | Notes |
+|---|---|
+| Cut first release tag | Go binaries not yet downloadable |
+| Push cli/runtime/installer changes | Committed locally in /tmp |
+| Checksum verification in installer | `checksums.txt` published but not verified on download |
+| Pin GitHub Actions to SHAs | Currently using mutable `@v4` tags |
+| Audit charm ecosystem deps | bubbletea, bubbles, lipgloss — review changelogs and signatures |
+| Search bar in TUI launcher | Filter commands as you type |
+| Architecture diagram | System overview + TUI state flow diagram |
+| Progress bar in exec panel | Placeholder in `execView()` already exists |
+| Security tests | Input sanitisation, path traversal, subprocess arg injection |
+| Convert Ansible to native Go | Gradual, where it makes sense |
+| Merge `ansible-lint` branch | ansible-lint + syntax check CI |
 
-Go just detects platform (`platform.Detect()`) and passes to Ansible via extra-vars:
-- `valet_current_path` - working directory
-- Ansible roles handle OS-specific logic
-
-### Intel vs ARM (Apple Silicon)
-Detected via `runtime.GOARCH`:
-- `amd64` → Intel
-- `arm64` → Apple Silicon / ARM64
-
-## Version Handling
-
-Versions are stored as:
-- Git tags: `v2.10.0` (with 'v' prefix)
-- In-code: `2.10.0` (without 'v')
-- Git describe: `2.9.19-102-g35e11d2` (for dev builds)
-
-Comparison uses semver parsing (major, minor, patch), ignoring git suffixes.
-
-## Future Enhancements
-
-### Checksum Verification (In Progress)
-Planned: Installer should verify binary checksums against checksums.txt from releases.
-
-### Self-Update (In Progress)
-Planned: Go CLI handles its own updates instead of calling installer.
-
-### More Commands
-Potential additions:
-- `valet.sh doctor` - diagnostic/health check
-- `valet.sh logs` - service log aggregation
-- `valet.sh snapshot` - project state snapshots
-
-## Troubleshooting
-
-### "ansible-playbook not found"
-Check: `/usr/local/valet-sh/venv/bin/ansible-playbook` exists
-Fix: Run `valet-sh-installer setup` to recreate venv
-
-### Update check not running
-Check: `/usr/local/valet-sh/etc/.last_update_check` timestamp
-If less than 7 days old, update check is skipped (by design)
-
-### Linter errors
-See AGENTS.md - do NOT add nolint comments.
+---
 
 ## Domain Terminology
 
-- **valet-sh** - The project name
-- **valet.sh** - The user-facing command (symlink to Go binary via bash wrapper)
-- **init-instance** - Bootstrap a project from .valet-sh.yml
-- **link** - Create nginx vhost for current directory
-- **restore** - Sync DB/files from remote hub
-- **service** - Manage background services (start/stop/restart)
-
-## External Dependencies
-
-### GitHub Repositories
-- `valet-sh/valet-sh` - This repo (Go CLI + Ansible)
-- `valet-sh/installer` - Bootstrap installer (separate Go binary)
-- `valet-sh/cli` - Python package with bash wrapper (separate repo)
-- `valet-sh/runtime` - Python venv tarball (separate repo)
-
-### Binary Dependencies (managed by installer)
-- Go 1.22+
-- Python 3.x + venv
-- Ansible (via pip in venv)
-- Various system packages (nginx, dnsmasq, etc.)
-
-## License & Copyright
-
-Apache 2.0 - TechDivision GmbH 2025
-All code files must include the standard copyright header.
+| Term | Meaning |
+|---|---|
+| `valet-sh` | The project name |
+| `valet.sh` | The user-facing command (bash wrapper → Go binary) |
+| `init-instance` | Bootstrap a project from `.valet-sh.yml` |
+| `link` | Create nginx vhost + SSL cert for current directory |
+| `restore` | Sync DB/files from remote hub environment |
+| `service` | Manage background services (start/stop/restart/enable/disable) |
+| hub | Remote environment (usually staging) used as data source for `restore` |
+| instance key | Project hostname prefix (`key: "myproject"` → `myproject.test`) |
