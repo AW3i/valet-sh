@@ -147,53 +147,59 @@ These indices match the ANSI codes used by the Ansible Python callback plugin
 
 ---
 
-## CLI Task Display (Hold-Timer Model)
+## CLI Task Display (Direct-Assignment Model)
 
 ### Problem Solved
 
-The CLI execution panel needed to display the current Ansible task in a human-readable way:
+The CLI execution panel needed to display the current Ansible task in a human-readable way without freezing or disconnecting from reality during long-running operations.
 
-1. **Initial Design (Queue Model)**: Buffered all discovered tasks in a queue, draining one per 50ms tick (every tick). This caused:
+**Failed Attempts:**
+
+1. **Initial Design (Queue Model)**: Buffered all discovered tasks in a queue, draining one per tick. This caused:
    - Queue exhaustion: tasks from the first batch (300ms of log output) were consumed in 2-3 seconds
-   - Freeze during long tasks: once the queue emptied, display froze at "ensure rabbitmq is started" (or similar) until the next new task appeared, which could be 30-60+ seconds later
-   - Historical replay: showed history of completed tasks rather than what Ansible is currently doing
+   - Display freeze: once the queue emptied, the display froze at the last task even as Ansible was executing new, long-running operations
+   - Historical replay: showed completed tasks from the past rather than what Ansible is currently working on
 
-2. **Second Design (Paced Queue)**: Added a 250ms hold timer per task (dequeue one every 5 ticks). This helped but still suffered from:
-   - Queue drain dependency: tasks still queued up and drained, causing same freeze issue
-   - Disconnected from reality: showing historical tasks while long operations run
+2. **Second Design (Paced Queue)**: Added a 250ms hold timer per task (dequeue one every 5 ticks). Still failed:
+   - Initialization bug: the first batch of ~80 tasks all arrived in the initial 300ms, so `nextTask` was set to each one (last one wins), then the init guard fired immediately. After init, `nextTask` stayed empty until new task lines appeared
+   - During long operations (e.g., waiting 60+ seconds for RabbitMQ to start): no new `TASK [...]` lines in the log, so `nextTask` never updated, and the display stayed frozen on the last task from the initial batch
+   - The fundamental problem: trying to animate/queue historical tasks instead of directly showing what Ansible is currently on
 
-### Solution: Hold-Timer Model
+### Solution: Direct-Assignment Model
 
-Redesigned to show **what Ansible is currently doing**, not a queue of historical tasks.
+Simplified to always show **the most recently discovered task** (what Ansible is currently executing).
 
 **Fields in `ExecModel`:**
-- `currentTask string` — task currently being displayed
-- `nextTask string` — most recently discovered task waiting to show
-- `lastTaskChangedAt time.Time` — timestamp of last display update
+- `currentTask string` — human-readable name of the task being displayed
+  - Always reflects the most recently discovered task from the log
+  - Extracted from `TASK [role : task_name]` lines
 
 **Logic:**
 
-1. When a new `TASK [...]` line appears in the log:
-   - Set `nextTask = parsed_task_name`
-   - If `currentTask` is empty (first task), immediately set `currentTask = nextTask`
+In `appendLine()` and `appendLines()` (called whenever new log lines arrive):
+```
+if line starts with "TASK [":
+    taskName = parse the task name
+    if taskName != "":
+        currentTask = taskName  // Always show the most recent task
+```
 
-2. On each 50ms tick (execTickMsg):
-   - If `nextTask != ""` AND `time.Since(lastTaskChangedAt) >= 250ms`:
-     - Advance: `currentTask = nextTask`, clear `nextTask`, update timestamp
+**Why This Works:**
 
-3. On process completion (execDoneMsg):
-   - Flush any pending `nextTask` to `currentTask` so final task is always shown
+- **No queue, no state machine**: just a single `currentTask` field that gets updated to the latest discovered task
+- **Naturally shows what's current**: when Ansible runs 80 tasks in 300ms then blocks on task 81 (RabbitMQ wait for 60+ seconds):
+  - First 300ms: log lines pour in with 80 `TASK [...]` markers, `currentTask` is updated 80 times, ends at task 81
+  - Next 60 seconds: RabbitMQ is running, no new `TASK [...]` lines in the log, `currentTask` stays showing task 81 (which is actually running)
+  - Display is never frozen or disconnected from reality
+- **User mental model**: "show me what Ansible is doing right now" ← this model delivers exactly that
+- **No animation needed**: the spinner animation provides feedback that something is happening
 
-**Result:**
-- **No queue exhaustion**: only one "pending" task is kept (`nextTask`)
-- **Responsive to Ansible**: displays what's currently running, not historical replay
-- **Human-readable pacing**: each task shown for minimum 250ms, fast tasks each get visibility, slow tasks stay showing naturally
-- **Always accurate**: if a long task takes 60 seconds, it displays for 60 seconds (no disconnect)
+**Historical Context:**
 
-**Commits:**
-- `517fd52`: Initial task queue implementation (superseded)
-- `3e42896`: Queue pacing refinement (superseded)
-- `49c1675`: Replace with hold-timer model ← **current design**
+- `517fd52`: Initial queue model (superseded)
+- `3e42896`: Paced queue refinement (superseded)  
+- `49c1675`: Attempted hold-timer model (reverted due to initialization bug, see problem #2 above)
+- Latest: Revert to simpler, correct direct-assignment model ← **current design**
 
 ### Log Viewer Prompt Interaction
 

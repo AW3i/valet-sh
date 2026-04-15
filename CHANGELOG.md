@@ -13,33 +13,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 
-**Task Display: Queue Model → Hold-Timer Model** ([`49c1675`](https://github.com/valet-sh/valet-sh/commit/49c1675))
+**Task Display: Hold-Timer Model → Direct-Assignment Model (Simpler, Correct Behavior)** 
 
-Redesigned the CLI execution panel task display from a queue-based model to a hold-timer model to fix freezing during long-running Ansible tasks.
+The hold-timer model attempted to show the most recent task while buffering pending ones, but had a critical initialization bug that caused the display to freeze. Reverted to a simpler, more correct model that directly assigns `currentTask` to the most recently discovered task.
 
-**Problem:** The queue model buffered discovered tasks and drained them at a fixed pace (one per tick, then one per 5 ticks). This caused:
-- **Queue exhaustion**: All tasks from the first ~300ms of log output were consumed within 2-3 seconds
-- **Display freeze**: Once the queue emptied, the task name stayed frozen at the last dequeued task (e.g., "ensure rabbitmq is started") while Ansible continued working on that task for 30-60+ seconds, giving no feedback
+**Previous Problem (Hold-Timer):** 
+- During the initial 300ms, ~80 tasks arrived in the first log batch. The init guard would fire and lock `nextTask` to empty, leaving the display showing only the first task while Ansible executed tasks 2-80 and beyond
+- During long operations (RabbitMQ wait, 60+ seconds): no new `TASK [...]` lines meant `nextTask` never updated, so the display stayed frozen on whatever task was displayed when the long operation started
+- Root cause: trying to animate/queue historical tasks instead of directly reflecting what Ansible is currently executing
 
-**Solution:** Replace queue with a simpler model that shows what Ansible is currently doing:
-- `nextTask string` — most recently discovered task, waiting to be shown
-- `lastTaskChangedAt time.Time` — timestamp of when `currentTask` was last updated
-- Each discovered task displays for minimum 250ms before advancing to the next pending task
-- Only one "pending" task is kept in memory at a time (no queue backlog)
+**Solution:** Simplify to always show the most recently discovered task:
+- Remove `nextTask` and `lastTaskChangedAt` fields — no queuing or state machine needed
+- In `appendLine()` / `appendLines()`: directly set `currentTask = taskName` whenever a `TASK [...]` line is discovered
+- Result: display always shows what Ansible is currently on, naturally updates as new tasks begin
 
-**Benefits:**
-- No queue exhaustion — only one pending task kept in buffer
-- Always accurate — displays what Ansible is currently doing, not historical replay
-- Natural pacing — fast tasks each get brief visibility; slow long-running tasks naturally stay showing longer
-- Clean implementation — simpler logic, fewer edge cases
+**Why This Works:**
+- When 80 tasks run in 300ms: `currentTask` updates 80 times, ends at task 81
+- When task 81 is blocked for 60 seconds: no new `TASK [...]` lines, `currentTask` stays at task 81 (the one actually running)
+- No disconnection from reality, no freezing, no complex state machines
 
 **Code changes:**
-- `ExecModel` struct: removed `taskQueue []string`, `taskQueueTick int`; added `nextTask string`, `lastTaskChangedAt time.Time`
-- `appendLine()` / `appendLines()` — set `nextTask` to discovered task name instead of appending to queue
-- `execTickMsg` handler — use `time.Since(lastTaskChangedAt)` to advance task when 250ms+ elapsed
-- `execDoneMsg` handler — flush `nextTask` to `currentTask` on completion
+- `ExecModel` struct: removed `nextTask string`, `lastTaskChangedAt time.Time`
+- `appendLine()` / `appendLines()` — simplified to directly assign `currentTask = taskName`
+- `execTickMsg` handler — removed hold-timer logic entirely
+- `execDoneMsg` handler — removed `nextTask` flush logic
 
-See [docs/architecture.md - CLI Task Display](docs/architecture.md#cli-task-display-hold-timer-model) for detailed design documentation.
+**Historical iterations:**
+- `517fd52` — Initial queue model (exhaustion problem)
+- `3e42896` — Paced queue (still had exhaustion during long ops)
+- `49c1675` — Hold-timer model (initialization and freezing bug)
+- Latest — Revert to direct-assignment (correct, simplest design)
+
+See [docs/architecture.md - CLI Task Display](docs/architecture.md#cli-task-display-direct-assignment-model) for detailed design documentation.
 
 ---
 
@@ -69,15 +74,16 @@ Fixed the "View full log?" prompt interaction to open log viewer with a single k
 **Commits:**
 - `517fd52` — Implement task queue for smooth sequential task display in CLI (superseded)
 - `3e42896` — Fix task queue pacing and Y key handling (superseded)
-- `49c1675` — Replace task queue with hold-timer mechanism and fix single-y log open (**current**)
+- `49c1675` — Hold-timer model (reverted due to initialization bug)
+- Latest — Revert to direct-assignment model, simpler and correct (**current**)
 
 **Files modified:**
-- `cli/internal/tui/exec.go` — core task display logic, key handling
-- `docs/architecture.md` — design documentation
+- `cli/internal/tui/exec.go` — simplified task display logic (removed queue/hold-timer)
+- `docs/architecture.md` — updated design documentation
 
 **Testing:**
 - Build: successful, no compilation errors
-- Binary verified: `dist/valet` created at `2.9.19-135-g3e42896-dirty`
+- Changes are in `cli` subdirectory with its own `go.mod`
 
 ---
 
