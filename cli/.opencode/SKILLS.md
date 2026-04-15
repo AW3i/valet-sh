@@ -387,13 +387,13 @@ if c.Services.Redis != nil && c.Services.Valkey != nil {
 
 | Item | Priority | Notes |
 |---|---|---|
-| Checksum verification in installer | High | `checksums.txt` published but not verified on download |
+| ~~Checksum verification in installer~~ | ~~High~~ | ~~Done — SHA-256 verification added to valet-sh-installer~~ |
 | Security audit: RCE surface | High (deferred) | Trace all subprocess arg paths |
 | Pin GitHub Actions to commit SHAs | High (deferred) | Currently mutable `@v4` tags |
 | Audit charm ecosystem deps | High (deferred) | bubbletea, bubbles, lipgloss |
 | Security tests | Medium | Input sanitisation, path traversal |
-| Architecture diagram | Medium | System overview + TUI state flow |
-| Progress bar in exec panel | Medium | No placeholder in execView() anymore — implement from scratch |
+| ~~Architecture diagram~~ | ~~Medium~~ | ~~Done — docs/architecture.md with 3 Mermaid diagrams~~ |
+| Progress bar in exec panel | Medium | Pre-parse with --list-tasks, show [=====>] bar with task counts |
 | Shell completions | Medium | bash/zsh/fish via cobra — install during `valet-sh-installer setup/update` |
 | TUI: Tab toggles horizontal ↔ vertical list view | Low | `<Tab>` cycles layout; both renderers exist, just swap which `render()` calls |
 | TUI grid layout view | Low | 2-column grid as third layout option |

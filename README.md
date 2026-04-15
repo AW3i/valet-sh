@@ -120,6 +120,9 @@ comment suspicious code, consult the user before proceeding.
 | Cut first release tag | Low |
 | Push `valet-sh/cli`, `runtime`, `installer` changes | Low |
 | Merge `ansible-lint` branch | Low |
+| Fix Password on TUI | High |
+| Password doesn't get asked when running a bare command | High |
+| When running bare commands the tui takes over completely | High |
 
 ---
 
