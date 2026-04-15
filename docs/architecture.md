@@ -147,59 +147,91 @@ These indices match the ANSI codes used by the Ansible Python callback plugin
 
 ---
 
-## CLI Task Display (Direct-Assignment Model)
+## CLI Task Display: Real-Time Streaming from Ansible stdout
 
 ### Problem Solved
 
-The CLI execution panel needed to display the current Ansible task in a human-readable way without freezing or disconnecting from reality during long-running operations.
+The CLI execution panel needed to display **current Ansible task names in real time** as Ansible moves from task to task, without stalling or showing stale information during long-running operations.
 
-**Failed Attempts:**
+### Root Cause Analysis
 
-1. **Initial Design (Queue Model)**: Buffered all discovered tasks in a queue, draining one per tick. This caused:
-   - Queue exhaustion: tasks from the first batch (300ms of log output) were consumed in 2-3 seconds
-   - Display freeze: once the queue emptied, the display froze at the last task even as Ansible was executing new, long-running operations
-   - Historical replay: showed completed tasks from the past rather than what Ansible is currently working on
+The initial implementation streamed task names from Ansible's stdout pipe but task names were not appearing in real time. Investigation revealed:
 
-2. **Second Design (Paced Queue)**: Added a 250ms hold timer per task (dequeue one every 5 ticks). Still failed:
-   - Initialization bug: the first batch of ~80 tasks all arrived in the initial 300ms, so `nextTask` was set to each one (last one wins), then the init guard fired immediately. After init, `nextTask` stayed empty until new task lines appeared
-   - During long operations (e.g., waiting 60+ seconds for RabbitMQ to start): no new `TASK [...]` lines in the log, so `nextTask` never updated, and the display stayed frozen on the last task from the initial batch
-   - The fundamental problem: trying to animate/queue historical tasks instead of directly showing what Ansible is currently on
+**Python's Buffering Behavior:**
+- The Ansible callback plugin (`/usr/local/valet-sh/valet-sh/plugins/callback/valet-sh.py`) writes task names via `print(..., end="\r")`
+- When stdout is connected to a pipe (not a TTY), Python defaults to **full buffering** (8 KB buffer)
+- Without explicit `sys.stdout.flush()`, task name writes sit in the buffer until:
+  1. Buffer fills (rare; happens after ~100 tasks)
+  2. Process exits (common case — all buffered output arrives at once, or not at all for interrupted runs)
+- Result: task display showed nothing for entire long-running operations, then suddenly all tasks at the very end
 
-### Solution: Direct-Assignment Model
+### Solution: Force Line Buffering
 
-Simplified to always show **the most recently discovered task** (what Ansible is currently executing).
+Set `PYTHONUNBUFFERED=1` in the Ansible subprocess environment. This forces Python to use **line buffering** for stdout when connected to a pipe, ensuring each `print()` call flushes immediately to the pipe.
 
-**Fields in `ExecModel`:**
-- `currentTask string` — human-readable name of the task being displayed
-  - Always reflects the most recently discovered task from the log
-  - Extracted from `TASK [role : task_name]` lines
+**Implementation:**
+- `cli/internal/ansible/runner.go:248` — added `"PYTHONUNBUFFERED=1"` to the subprocess environment passed to `ansible-playbook`
 
-**Logic:**
+**Effect:**
+- Each task arrival now generates a separate read from the stdout pipe in real time
+- Go goroutine `readTaskCmd()` receives data like `"\x1b[2K\r⠙ taskname\r"` (flush + spinner animation + task name)
+- Progress bar updates instantly as Ansible transitions between tasks
+- Display naturally reflects what Ansible is currently executing
 
-In `appendLine()` and `appendLines()` (called whenever new log lines arrive):
+### Data Flow
+
 ```
-if line starts with "TASK [":
-    taskName = parse the task name
-    if taskName != "":
-        currentTask = taskName  // Always show the most recent task
+Ansible callback (stdout pipe)
+  ↓
+PYTHONUNBUFFERED=1 forces flush
+  ↓
+Go readTaskCmd() reads "\x1b[2K\r⠙ taskname\r"
+  ↓
+parseAnsibleTaskLine() extracts "taskname"
+  ↓
+currentTask updated
+  ↓
+Progress bar re-renders with new task name
 ```
 
-**Why This Works:**
+### Defensive Parsing Improvements
 
-- **No queue, no state machine**: just a single `currentTask` field that gets updated to the latest discovered task
-- **Naturally shows what's current**: when Ansible runs 80 tasks in 300ms then blocks on task 81 (RabbitMQ wait for 60+ seconds):
-  - First 300ms: log lines pour in with 80 `TASK [...]` markers, `currentTask` is updated 80 times, ends at task 81
-  - Next 60 seconds: RabbitMQ is running, no new `TASK [...]` lines in the log, `currentTask` stays showing task 81 (which is actually running)
-  - Display is never frozen or disconnected from reality
-- **User mental model**: "show me what Ansible is doing right now" ← this model delivers exactly that
-- **No animation needed**: the spinner animation provides feedback that something is happening
+To handle edge cases and ensure robust task name extraction:
 
-**Historical Context:**
+1. **`readTaskCmd()` Internal Loop (exec.go:~635)**
+   - Changed behavior: only return on IO error/EOF, not on empty parse results
+   - Reason: flush-only reads (`"\x1b[2K\r"` with no task name) would trigger spurious EOF detection
+   - Now loops internally reading until it gets a real task name or actual EOF
 
-- `517fd52`: Initial queue model (superseded)
-- `3e42896`: Paced queue refinement (superseded)  
-- `49c1675`: Attempted hold-timer model (reverted due to initialization bug, see problem #2 above)
-- Latest: Revert to simpler, correct direct-assignment model ← **current design**
+2. **`parseAnsibleTaskLine()` Spinner Validation (exec.go:~656)**
+   - Added `spinnerRunes` map with known braille characters: `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`
+   - Validates that extracted task names start with a valid spinner rune
+   - Prevents play-start lines (`▶ Play Name`) from being misidentified as task names
+   - Ensures only actual Ansible task lines are processed
+
+**Test Coverage (`exec_test.go`):**
+- 7 test cases for `parseAnsibleTaskLine` covering: normal tasks, flush-only lines, play-start lines, mixed input
+- `TestReadTaskCmdSkipsFlushLines` verifies the internal loop behavior
+- All tests pass
+
+### Code Changes
+
+**Files modified:**
+- `cli/internal/ansible/runner.go` — `PYTHONUNBUFFERED=1` environment variable
+- `cli/internal/tui/exec.go` — improved `readTaskCmd()` loop + `parseAnsibleTaskLine()` validation
+- `cli/internal/tui/exec_test.go` — expanded test coverage
+
+**Commits:**
+- `360c34c` — Initial stdout pipe streaming (had buffering issue)
+- `6af1c41` — Previous log-file-based approach (was working but slower)
+- Latest — `PYTHONUNBUFFERED=1` fix + defensive parsing improvements (**current design**)
+
+### Why This Works
+
+- **Immediate feedback**: task names appear as soon as Ansible writes them, not minutes later
+- **Handles long operations**: when Ansible blocks on a long task (e.g., RabbitMQ startup), the display shows which task is blocking
+- **No stale data**: current task always reflects what `ansible-playbook` is executing right now
+- **Single-line fix**: `PYTHONUNBUFFERED=1` is minimal, maintainable, and doesn't require modifications to the Ansible callback plugin
 
 ### Log Viewer Prompt Interaction
 
@@ -217,4 +249,4 @@ Fixed the "View full log?" prompt to open on single keypress:
 
 **Code location:** `cli/internal/tui/exec.go:handleKey()` — error-state branch checks for y/Y and bypasses intermediate prompt state.
 
-**Commit:** `49c1675` (same commit as hold-timer redesign)
+**Commit:** `49c1675`
