@@ -5,16 +5,18 @@
 **CRITICAL:** After every code change, always build `dist/valet`:
 
 ```bash
-cd cli && make build
+cd ../valet-sh-cli && make build
 ```
 
-The developer tests directly from `dist/valet`. Failing to build means the developer is testing stale code. Never skip this step.
+The Go CLI source has moved to the sibling `valet-sh-cli` repository.
+The developer tests directly from `valet-sh-cli/dist/valet`. Failing to
+build means the developer is testing stale code. Never skip this step.
 
 ## Binary Locations & Entry Points
 
-- **`/usr/local/bin/valet.sh`** — Bash wrapper script. Calls `ansible-playbook` directly. Does NOT use the Go binary.
-- **`dist/valet`** — Go binary (dev build). Developer tests directly from this path.
-- **`/usr/local/valet-sh/bin/valet`** — Installed copy of the Go binary. Created by `make install`.
+- **`/usr/local/bin/valet.sh`** — Bash wrapper script. Does NOT use the Go binary directly; delegates via `exec` to the installed Go binary.
+- **`../valet-sh-cli/dist/valet`** — Go binary (dev build). Developer tests directly from this path.
+- **`/usr/local/valet-sh/bin/valet`** — Installed copy of the Go binary. Created by `make install` in `valet-sh-cli/`.
 
 ## TUI Architecture
 
