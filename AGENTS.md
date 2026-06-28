@@ -12,6 +12,16 @@ The Go CLI source has moved to the sibling `valet-sh-cli` repository.
 The developer tests directly from `valet-sh-cli/dist/valet`. Failing to
 build means the developer is testing stale code. Never skip this step.
 
+**Also set `VALET_REPO_DIR`** so the dev binary reads playbooks and
+`ansible.cfg` from this repo instead of the installed production path:
+
+```bash
+export VALET_REPO_DIR=/path/to/valet-sh
+```
+
+Without this, the binary uses `/usr/local/valet-sh/valet-sh` which may have
+a stale `ansible.cfg` and callback plugin — causing silent failures.
+
 ## Binary Locations & Entry Points
 
 - **`/usr/local/bin/valet.sh`** — Bash wrapper script. Does NOT use the Go binary directly; delegates via `exec` to the installed Go binary.
