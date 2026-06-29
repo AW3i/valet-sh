@@ -4,13 +4,17 @@
 # @author: "Philipp Dittert"
 # @command: "exec"
 # @platform: macOS Ubuntu
-# @description: "<todo>"
+# @description: "Execute commands in the project environment (PHP, MySQL)"
 # @usage: "valet.sh exec <action>"
 # @help:
 #
-# all commands will be executed on the default mysql database you selected
+# All commands will be executed in the project environment with access to
+# PHP, MySQL, and other configured services.
 #
-# valet.sh exec ls
+# Examples:
+#   valet.sh exec php -v
+#   valet.sh exec mysql -u root
+#   valet.sh exec composer install
 #
 ---
 

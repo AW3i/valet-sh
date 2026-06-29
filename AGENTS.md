@@ -38,37 +38,40 @@ a stale `ansible.cfg` and callback plugin — causing silent failures.
   
 - **TUI launcher mode** (`dist/valet` with no args, navigate menu → Enter): Full panel view
   - Header: breadcrumb + version
-  - Spinner: animated indicator + current task name
-  - Log viewport: scrollable live log (`↑/↓` to scroll)
-  - Footer: status/hint line
+  - Spinner: animated indicator + current task name (updated in real time from JSON events)
+  - Footer: status/hint line with keybinding hints
+  - **On failure:** exits BubbleTea, displays full log to stdout with native terminal selection (Kitty-compatible)
 
 ### View Routing
-- `withSidebar=false` → `cliView()` (minimal, no log)
-- `withSidebar=true` → `execView()` (full panel with scrollable log)
-- **Launcher** (`launcher.go:394`) passes `withSidebar=true`
-- **Standalone runner** (`runner.go:92`) passes `withSidebar=false`
+- **CLI mode** — `runner.go:RunSubprocess()` → `runExecPanel()` starts BubbleTea with `standaloneExecModel`
+  - Displays `cliView()` (minimal progress bar)
+  - No sidebar, no scrolling
+- **Launcher mode** — `launcher.go` manages screen state machine
+  - `screenList` (command list with filter)
+  - `screenInline` (argument input + help preview)
+  - `screenExec` (execution panel with spinner)
+  - `screenHelp` (read-only scrollable help viewer)
+  - **On failure:** calls `printLogView()` which exits BubbleTea and prints log to stdout
 
 ## Task Display & Logging
 
 ### Current Task Updates
-- `currentTask` field updated every 50ms from `TASK [...]` lines in the log file
-- Updated via `appendLine()` and `appendLines()` when parsing log lines
+- `currentTask` field updated in real time as Ansible events arrive via JSON streaming
+- Updated via `parseJSONEvent()` when `v2_playbook_on_task_start` events are received
 - Meta-tasks (`include_tasks`, `import_tasks`, `include_role`, `import_role`) are **skipped** — they don't update `currentTask`
 - Task names are shortened via `shortTaskName()` function:
   - Strips role prefix: `"role : task"` → `"task"`
   - Extracts description after pipe: `"role : ... | description"` → `"description"`
   - Handles bare task names unchanged
 
-### Log File Reading
-- **Path:** `/usr/local/valet-sh/valet-sh/log/debug.log`
-- **Rotation:** Ansible callback plugin rotates it at startup via `doRollover()`
-- **Re-opened each tick** (not kept open) to detect rotation by inode
-- **Inode tracking:** When inode changes, reset `logFileOffset` to 0 to read the new file from start
-- **Seek-based offset:** Fresh `bufio.Reader` created each tick starting from `logFileOffset`
-- This approach correctly detects:
-  - New content appended to the file
-  - File rotation (inode change)
-  - EOF then growth (avoids `bufio.Reader` EOF caching issues)
+### JSON Event Streaming
+- **Callback:** `ansible.posix.jsonl` (official Ansible callback, not custom Python)
+- **Format:** One JSON object per line to stdout; contains structured task name, result data, and error details
+- **Consumption:** `readTaskCmd()` goroutine reads pipe in real time, parses JSON lines via `parseJSONEvent()`
+- **Error Details:** Structured JSON result includes `msg`, `stderr`, `stdout`, `rc`, `cmd` fields
+  - `formatFailureLines()` and `formatWarningLines()` compose readable error blocks
+  - Developers see failure context immediately in TUI without hunting through log files
+- **EOF Detection:** When pipe closes, `readTaskCmd()` sends `ansibleEventMsg{eof: true}` to coordinate quit with process exit
 
 ## Error Handling in TUI Launcher
 
@@ -79,31 +82,35 @@ When a command fails:
 4. **N or Esc** quits the program
 5. Error handling is rendered in `execView()` footer when `e.done && e.err != nil`
 
-This is different from CLI mode, which requires two keypresses (show prompt, then confirm).
+This is different from CLI mode, which requires two keypresses (show prompt, then confirm). The failure context (stderr, return code, command that failed) comes from structured JSON event results, not file-based logging.
 
 ## Code Locations
 
 | Feature | File |
 |---------|------|
-| Inode tracking & file rotation detection | `exec.go:116-128` |
-| Log file re-open with rotation handling | `exec.go:620-655` |
-| Task text updates (skip meta-tasks) | `exec.go:543-576` |
-| Task name shortening | `exec.go:851-875` |
+| Ansible JSON schema & parsing | `exec.go:10-80` (imports) + `ansible_events.go:1-60` |
+| Task text updates (skip meta-tasks) | `ansible_events.go:180-220` |
+| Task name shortening | `ansible_events.go:240-270` |
+| Error formatting (failure/warning blocks) | `ansible_events.go:90-180` |
 | CLI mode (minimal view) | `exec.go:382-413` |
 | TUI launcher mode (full view) | `exec.go:420-450` |
 | Error prompt in TUI launcher | `exec.go:438-452` |
-| Launcher configuration | `launcher.go:394` |
-| Standalone runner configuration | `runner.go:92` |
+| Launcher configuration & screen routing | `launcher.go:1-100` |
+| Standalone runner configuration | `runner.go:70-150` |
+| Interactive help viewer | `help.go:1-150` |
+| Terminal layout utilities | `layout.go:1-60` |
 
 ## Testing
 
 Run all tests with:
 ```bash
-cd cli && go test ./internal/tui -v
+cd ../valet-sh-cli && go test ./internal/tui -v
 ```
 
 Key test areas:
 - Meta-task filtering
 - Task name shortening
 - Error prompt rendering
-- Inode detection (manual testing recommended)
+- JSON event parsing and error formatting
+- Help view state transitions
+- Screen state machine routing

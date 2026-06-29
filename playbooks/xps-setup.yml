@@ -6,9 +6,13 @@
 # @author: "Johann Zelger"
 # @author: "Philipp Dittert"
 # @author: "Florian Schmid"
+# @command: "xps-setup"
+# @description: "Configure Dell XPS Notebook for development"
 # @usage: "valet.sh xps-setup"
 # @help:
-# tbd...
+#
+# Configures a Dell XPS notebook with required development tools and settings
+# according to the machine model and family specifications.
 ---
 - name: "xps-setup"
   hosts: local
